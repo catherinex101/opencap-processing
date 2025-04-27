@@ -17,22 +17,6 @@
     limitations under the License.
 
     Please contact us for any questions: https://www.opencap.ai/#contact
-
-    ---------------------------------------------------------------------------
-    This is used to compute scalar metrics and gait cycle-averaged kinematic curves.
-
-    SNAPL Recommended Steps: (assuming files are stored under C:/Users/cxiang/Documents/GitHub/opencap-processing/subLSS)
-    0. Prepare:
-        Modify sessionDir and trialName in code below, if necessary
-        Add relevant Opencap data files into Data\sub-LSSPilot\ folder
-    1. Open Anaconda Powershell Prompt
-    2. conda activate opencap
-    3. cd "C:\Users\cxiang\Documents\GitHub\opencap-processing\subLSS"
-    4. python sublss_gait_analysis.py
-    5. Review:
-        Right / left foot metrics will print directly on Anaconda Prompt
-        Kinematics graphs will pop up
-        Gait analysis table will be exported to output_dir, when kinematics graph is closed
 '''
 
 import os
