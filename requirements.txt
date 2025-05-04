@@ -10,3 +10,12 @@ pyyaml
 joblib
 cmake
 seaborn
+
+# New packages needed for video cropping
+moviepy==1.0.3
+imageio==2.31.1
+imageio-ffmpeg==0.4.8
+tqdm
+
+# Critical: pin numpy under 2.0 for scipy compatibility
+numpy>=1.18.5,<1.25

@@ -1,4 +1,4 @@
-"""
+﻿"""
     ---------------------------------------------------------------------------
     OpenCap processing: gaitAnalysis.py
     ---------------------------------------------------------------------------
@@ -6,6 +6,7 @@
     Copyright 2023 Stanford University and the Authors
     
     Author(s): Antoine Falisse, Scott Uhlrich
+    Modified by Catherine
     
     Licensed under the Apache License, Version 2.0 (the "License"); you may not
     use this file except in compliance with the License. You may obtain a copy
@@ -29,9 +30,21 @@ from matplotlib import pyplot as plt
 
 from utilsKinematics import kinematics
 
-
 class gait_analysis(kinematics):
-    
+
+    def print_gait_cycle_times(self):
+        """
+        Prints the start and end timestamps for each detected gait cycle.
+        Useful for verifying on video.
+        """
+        print(f"\nGait Cycles Timestamps (after trimming):\n")
+        
+        for i in range(self.nGaitCycles):
+          hs1 = self.gaitEvents['ipsilateralTime'][i,0]
+          to  = self.gaitEvents['ipsilateralTime'][i,1]
+          hs2 = self.gaitEvents['ipsilateralTime'][i,2]
+          print(f"Step {i+1}: HS1 = {hs1:.2f}s → TO = {to:.2f}s → HS2 = {hs2:.2f}s")
+
     def __init__(self, session_dir, trial_name, leg='auto',
                  lowpass_cutoff_frequency_for_coordinate_values=-1,
                  n_gait_cycles=-1, gait_style='auto', trimming_start=0, 

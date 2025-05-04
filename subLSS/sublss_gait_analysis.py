@@ -4,7 +4,8 @@
     ---------------------------------------------------------------------------
     Copyright 2023 Stanford University and the Authors
 
-    Author(s): Scott Uhlrich, modified by Catherine
+    Author(s): Scott Uhlrich
+    Modified by Catherine
     Adapted from example: example_gait_analysis.py
 
     Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,6 +24,8 @@ import os
 import sys
 import yaml
 import pandas as pd
+import subprocess
+
 sys.path.append("../")
 sys.path.append("../ActivityAnalyses")
 
@@ -30,24 +33,47 @@ from gait_analysis import gait_analysis
 from utils import get_trial_id, download_trial
 from utilsPlotting import plot_dataframe_with_shading
 
+# %% Functions.
+def crop_video_ffmpeg(input_path, output_path, start_time, end_time):
+    """
+    Crop a video file using ffmpeg with re-encoding, no audio, and preserved aspect ratio.
+    """
+    duration = end_time - start_time
+
+    cmd = [
+        'ffmpeg',
+        '-y',  # Overwrite output without prompt
+        '-ss', str(start_time),  # Start time
+        '-i', input_path,
+        '-t', str(duration),     # Duration to keep
+        '-an',                   # Remove audio
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',  # Ensure even dimensions
+        '-c:v', 'libx264',       # Video codec
+        '-preset', 'fast',
+        '-crf', '23',            # Quality: lower = better
+        '-movflags', '+faststart',  # Web playback optimized
+        output_path
+    ]
+
+    print(f"Running ffmpeg crop: {cmd}")
+    subprocess.run(cmd, check=True)
+    print(f"✅ Cropped video saved to {output_path}")
+
 # %% Paths.
 baseDir = os.path.join(os.getcwd(), '..')
 dataFolder = os.path.join(baseDir, 'Data')
 
-# %% User-defined variables.
-example = 'overground'
-
 scalar_names = {'gait_speed','stride_length','step_width','cadence',
                 'single_support_time','double_support_time','step_length_symmetry'}
 
-n_gait_cycles = 3
+n_gait_cycles = 1
 filter_frequency = 6
 
 # Set local session path and trial name manually
-sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\sub-LSSPilot\OpenCapData_532c118d-a51c-4b8b-9528-7c70ddf4fddb"
+sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\sub-LSSPilot\OpenCapData_edd37cfe-8d50-48b8-ab12-a966aec7be55"
 trialName = "10_m_walk"
 
-# === Load metadata for height and mass ===
+# Load metadata for height and mass
 metadata_path = os.path.join(sessionDir, 'sessionMetadata.yaml')
 with open(metadata_path, 'r') as f:
     metadata = yaml.safe_load(f)
@@ -55,15 +81,55 @@ with open(metadata_path, 'r') as f:
 height_m = metadata['height_m']
 mass_kg = metadata['mass_kg']
 
-# Init gait analysis.
+# ========== Right Gait Analysis ==========
 gait_r = gait_analysis(
     sessionDir, trialName, leg='r',
     lowpass_cutoff_frequency_for_coordinate_values=filter_frequency,
-    n_gait_cycles=n_gait_cycles)
+    n_gait_cycles=n_gait_cycles, gait_style='overground')
+
+gait_r.print_gait_cycle_times()
+
+start_time_r = gait_r.gaitEvents['ipsilateralTime'][-1, 0]  # HS1
+end_time_r   = gait_r.gaitEvents['ipsilateralTime'][-1, 2]  # HS2
+
+# Video paths for right gait
+video_filename = f"{trialName}_sync.mp4"
+cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
+cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
+
+save_cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_r.mp4")
+save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r.mp4")
+
+crop_video_ffmpeg(cam1_path_r, save_cam1_path_r, start_time_r, end_time_r)
+crop_video_ffmpeg(cam0_path_r, save_cam0_path_r, start_time_r, end_time_r)
+
+# ========== Left Gait Analysis ==========
 gait_l = gait_analysis(
     sessionDir, trialName, leg='l',
     lowpass_cutoff_frequency_for_coordinate_values=filter_frequency,
-    n_gait_cycles=n_gait_cycles)
+    n_gait_cycles=n_gait_cycles, gait_style='overground')
+
+gait_l.print_gait_cycle_times()
+
+start_time_l = gait_l.gaitEvents['ipsilateralTime'][-1, 0]  # HS1
+end_time_l   = gait_l.gaitEvents['ipsilateralTime'][-1, 2]  # HS2
+
+# Video paths for left gait
+cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
+cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
+
+save_cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_l.mp4")
+save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l.mp4")
+
+crop_video_ffmpeg(cam1_path_l, save_cam1_path_l, start_time_l, end_time_l)
+crop_video_ffmpeg(cam0_path_l, save_cam0_path_l, start_time_l, end_time_l)
+
+# For debugging
+#print(f"\nNumber of gait cycles in use: {gait_l.nGaitCycles}")
+#print("\nFull gait cycle times (HS1 → TO → HS2):")
+#for i, (hs1, to, hs2) in enumerate(gait_l.gaitEvents['ipsilateralTime']):
+#    print(f"Cycle {i + 1}: HS1 = {hs1:.2f}s → TO = {to:.2f}s → HS2 = {hs2:.2f}s")
+#print(f"\nipsilateralTime shape: {gait_l.gaitEvents['ipsilateralTime'].shape}")
 
 # Compute scalars and get time-normalized kinematic curves.
 gaitResults = {}
@@ -174,7 +240,7 @@ for key in metric_display:
 df_summary = pd.DataFrame(summary)
 
 # === Save to folder inside session directory ===
-output_dir = os.path.join(sessionDir, 'PilotAnalysis_4_21_25')
+output_dir = os.path.join(sessionDir, 'PilotAnalysis_4_27_25')
 os.makedirs(output_dir, exist_ok=True)
 
 output_path = os.path.join(output_dir, 'gait_summary_table.csv')
