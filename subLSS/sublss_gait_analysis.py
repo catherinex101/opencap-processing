@@ -11,6 +11,7 @@
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
     You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+
     Unless required by applicable law or agreed to in writing, software
     distributed under the License is distributed on an "AS IS" BASIS,
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,6 +26,7 @@ import sys
 import yaml
 import pandas as pd
 import subprocess
+import cv2
 
 sys.path.append("../")
 sys.path.append("../ActivityAnalyses")
@@ -35,29 +37,35 @@ from utilsPlotting import plot_dataframe_with_shading
 
 # %% Functions.
 def crop_video_ffmpeg(input_path, output_path, start_time, end_time):
-    """
-    Crop a video file using ffmpeg with re-encoding, no audio, and preserved aspect ratio.
-    """
     duration = end_time - start_time
-
     cmd = [
-        'ffmpeg',
-        '-y',  # Overwrite output without prompt
-        '-ss', str(start_time),  # Start time
-        '-i', input_path,
-        '-t', str(duration),     # Duration to keep
-        '-an',                   # Remove audio
-        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',  # Ensure even dimensions
-        '-c:v', 'libx264',       # Video codec
-        '-preset', 'fast',
-        '-crf', '23',            # Quality: lower = better
-        '-movflags', '+faststart',  # Web playback optimized
-        output_path
+        'ffmpeg', '-y', '-ss', str(start_time), '-i', input_path,
+        '-t', str(duration), '-an',
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-movflags', '+faststart', output_path
     ]
-
     print(f"Running ffmpeg crop: {cmd}")
     subprocess.run(cmd, check=True)
     print(f"✅ Cropped video saved to {output_path}")
+
+def get_video_duration(video_path):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Failed to open video: {video_path}")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    duration = frame_count / fps
+    cap.release()
+    return duration
+
+def select_valid_gait_cycle(gait_obj, video_duration, buffer=0.5):
+    gait_times = gait_obj.gaitEvents['ipsilateralTime']
+    for i in reversed(range(gait_times.shape[0])):
+        hs1, _, hs2 = gait_times[i]
+        if hs2 + buffer <= video_duration:
+            return hs1, hs2, i
+    return None, None, -1
 
 # %% Paths.
 baseDir = os.path.join(os.getcwd(), '..')
@@ -66,20 +74,24 @@ dataFolder = os.path.join(baseDir, 'Data')
 scalar_names = {'gait_speed','stride_length','step_width','cadence',
                 'single_support_time','double_support_time','step_length_symmetry'}
 
-n_gait_cycles = 1
+n_gait_cycles = 2
 filter_frequency = 6
 
 # Set local session path and trial name manually
 sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\sub-LSSPilot\OpenCapData_edd37cfe-8d50-48b8-ab12-a966aec7be55"
 trialName = "10_m_walk"
 
-# Load metadata for height and mass
 metadata_path = os.path.join(sessionDir, 'sessionMetadata.yaml')
 with open(metadata_path, 'r') as f:
     metadata = yaml.safe_load(f)
 
 height_m = metadata['height_m']
 mass_kg = metadata['mass_kg']
+
+video_filename = f"{trialName}_sync.mp4"
+cam1_path = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
+cam0_path = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
+video_duration_sec = min(get_video_duration(cam1_path), get_video_duration(cam0_path))
 
 # ========== Right Gait Analysis ==========
 gait_r = gait_analysis(
@@ -89,19 +101,16 @@ gait_r = gait_analysis(
 
 gait_r.print_gait_cycle_times()
 
-start_time_r = gait_r.gaitEvents['ipsilateralTime'][-1, 0]  # HS1
-end_time_r   = gait_r.gaitEvents['ipsilateralTime'][-1, 2]  # HS2
+hs1_r, hs2_r, idx_r = select_valid_gait_cycle(gait_r, video_duration_sec, buffer=0.5)
 
-# Video paths for right gait
-video_filename = f"{trialName}_sync.mp4"
-cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
-cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
+save_cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_r_5_4_2025.mp4")
+save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r_5_4_2025.mp4")
 
-save_cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_r.mp4")
-save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r.mp4")
-
-crop_video_ffmpeg(cam1_path_r, save_cam1_path_r, start_time_r, end_time_r)
-crop_video_ffmpeg(cam0_path_r, save_cam0_path_r, start_time_r, end_time_r)
+if idx_r != -1:
+    crop_video_ffmpeg(cam1_path, save_cam1_path_r, hs1_r, hs2_r)
+    crop_video_ffmpeg(cam0_path, save_cam0_path_r, hs1_r, hs2_r)
+else:
+    print("❌ No valid right gait cycle within video duration. Skipping right crop.")
 
 # ========== Left Gait Analysis ==========
 gait_l = gait_analysis(
@@ -111,34 +120,24 @@ gait_l = gait_analysis(
 
 gait_l.print_gait_cycle_times()
 
-start_time_l = gait_l.gaitEvents['ipsilateralTime'][-1, 0]  # HS1
-end_time_l   = gait_l.gaitEvents['ipsilateralTime'][-1, 2]  # HS2
+hs1_l, hs2_l, idx_l = select_valid_gait_cycle(gait_l, video_duration_sec, buffer=0.5)
 
-# Video paths for left gait
-cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
-cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
+save_cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_l_5_4_2025.mp4")
+save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l_5_4_2025.mp4")
 
-save_cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_l.mp4")
-save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l.mp4")
+if idx_l != -1:
+    crop_video_ffmpeg(cam1_path, save_cam1_path_l, hs1_l, hs2_l)
+    crop_video_ffmpeg(cam0_path, save_cam0_path_l, hs1_l, hs2_l)
+else:
+    print("❌ No valid left gait cycle within video duration. Skipping left crop.")
 
-crop_video_ffmpeg(cam1_path_l, save_cam1_path_l, start_time_l, end_time_l)
-crop_video_ffmpeg(cam0_path_l, save_cam0_path_l, start_time_l, end_time_l)
-
-# For debugging
-#print(f"\nNumber of gait cycles in use: {gait_l.nGaitCycles}")
-#print("\nFull gait cycle times (HS1 → TO → HS2):")
-#for i, (hs1, to, hs2) in enumerate(gait_l.gaitEvents['ipsilateralTime']):
-#    print(f"Cycle {i + 1}: HS1 = {hs1:.2f}s → TO = {to:.2f}s → HS2 = {hs2:.2f}s")
-#print(f"\nipsilateralTime shape: {gait_l.gaitEvents['ipsilateralTime'].shape}")
-
-# Compute scalars and get time-normalized kinematic curves.
+# === Gait Metrics and Plotting ===
 gaitResults = {}
 gaitResults['scalars_r'] = gait_r.compute_scalars(scalar_names)
 gaitResults['curves_r'] = gait_r.get_coordinates_normalized_time()
 gaitResults['scalars_l'] = gait_l.compute_scalars(scalar_names)
 gaitResults['curves_l'] = gait_l.get_coordinates_normalized_time()
 
-# Print scalar results.
 print('\nRight foot gait metrics:')
 print('-----------------')
 for key, value in gaitResults['scalars_r'].items():
@@ -151,7 +150,6 @@ for key, value in gaitResults['scalars_l'].items():
     rounded_value = round(value['value'], 2)
     print(f"{key}: {rounded_value} {value['units']}")
 
-# Plot normalized curves.
 plot_dataframe_with_shading(
     [gaitResults['curves_r']['mean'], gaitResults['curves_l']['mean']],
     [gaitResults['curves_r']['sd'], gaitResults['curves_l']['sd']],
@@ -160,21 +158,19 @@ plot_dataframe_with_shading(
     title = 'kinematics (m or deg)',
     legend_entries = ['right','left'])
 
-# === Compute average values across both legs ===
 avg_metrics = {}
 for key in scalar_names:
     if key == 'step_length_symmetry':
-        avg_metrics[key] = gaitResults['scalars_r'][key]  # Only use right side
+        avg_metrics[key] = gaitResults['scalars_r'][key]
         continue
     val_r = gaitResults['scalars_r'][key]['value']
     val_l = gaitResults['scalars_l'][key]['value']
     unit = gaitResults['scalars_r'][key]['units']
     avg_metrics[key] = {'value': (val_r + val_l) / 2, 'units': unit}
 
-# === Define thresholds for classification ===
 stride_threshold = 0.45 * height_m
-step_width_min = 0.043 * height_m * 100  # convert to cm
-step_width_max = 0.074 * height_m * 100  # convert to cm
+step_width_min = 0.043 * height_m * 100
+step_width_max = 0.074 * height_m * 100
 
 thresholds = {
     'gait_speed': {'good': 1.12},
@@ -199,7 +195,6 @@ def classify(metric, value):
     elif metric == 'step_length_symmetry':
         return 'within normal gait range' if thresholds[metric]['min'] <= value <= thresholds[metric]['max'] else 'asymmetric'
 
-# === Build gait analysis table for export ===
 metric_display = {
     'gait_speed': 'Gait speed (m/s)',
     'stride_length': 'Stride length (m)',
@@ -239,7 +234,6 @@ for key in metric_display:
 
 df_summary = pd.DataFrame(summary)
 
-# === Save to folder inside session directory ===
 output_dir = os.path.join(sessionDir, 'PilotAnalysis_4_27_25')
 os.makedirs(output_dir, exist_ok=True)
 
