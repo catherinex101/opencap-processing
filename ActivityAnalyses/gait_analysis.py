@@ -1,4 +1,4 @@
-﻿"""
+﻿r"""
     ---------------------------------------------------------------------------
     OpenCap processing: gaitAnalysis.py
     ---------------------------------------------------------------------------
@@ -43,7 +43,52 @@ class gait_analysis(kinematics):
           hs1 = self.gaitEvents['ipsilateralTime'][i,0]
           to  = self.gaitEvents['ipsilateralTime'][i,1]
           hs2 = self.gaitEvents['ipsilateralTime'][i,2]
-          print(f"Step {i+1}: HS1 = {hs1:.2f}s → TO = {to:.2f}s → HS2 = {hs2:.2f}s")
+          print(f"Step {i}: HS1 = {hs1:.2f}s → TO = {to:.2f}s → HS2 = {hs2:.2f}s")
+
+    def _compute_scalar(self, scalar_name, selected_indices):
+        """
+        Internal function to compute a scalar metric from selected gait cycles.
+        """
+        if scalar_name == 'gait_speed':
+            all_values, units = self.compute_gait_speed(return_all=True)
+        elif scalar_name == 'stride_length':
+            all_values, units = self.compute_stride_length(return_all=True)
+        elif scalar_name == 'step_width':
+            all_values, units = self.compute_step_width(return_all=True)
+        elif scalar_name == 'cadence':
+            all_values, units = self.compute_cadence(return_all=True)
+        elif scalar_name == 'single_support_time':
+            all_values, units = self.compute_single_support_time(return_all=True)
+        elif scalar_name == 'double_support_time':
+            all_values, units = self.compute_double_support_time(return_all=True)
+        elif scalar_name == 'step_length_symmetry':
+            all_values, units = self.compute_step_length_symmetry(return_all=True)
+        else:
+            raise ValueError(f"Unknown scalar name: {scalar_name}")
+        
+        value = float(np.mean(np.array(all_values)[selected_indices]))
+        return {'value': value, 'units': units}
+
+
+    def compute_scalars(self, scalar_names=None, selected_cycle_index=None):
+        """
+        Compute scalar gait metrics over selected gait cycles.
+        """
+        if scalar_names is None:
+            scalar_names = self.default_scalar_names
+
+        # Temporarily override selected cycles if index is passed
+        if selected_cycle_index is not None:
+            selected_indices = [selected_cycle_index]
+        else:
+            selected_indices = self.selectedCycleIndices
+
+        # Use selected_indices in your calculations instead of self.selectedCycleIndices
+        # Example:
+        result = {}
+        for scalar_name in scalar_names:
+            result[scalar_name] = self._compute_scalar(scalar_name, selected_indices)
+        return result
 
     def __init__(self, session_dir, trial_name, leg='auto',
                  lowpass_cutoff_frequency_for_coordinate_values=-1,
@@ -212,32 +257,6 @@ class gait_analysis(kinematics):
             _leg_length['contralateral'] = femur_length + tibia_length
         
         return _leg_length
-    
-    
-    def compute_scalars(self,scalarNames,return_all=False):
-               
-        # Verify that scalarNames are methods in gait_analysis.
-        method_names = [func for func in dir(self) if callable(getattr(self, func))]
-        possibleMethods = [entry for entry in method_names if 'compute_' in entry]
-        
-        if scalarNames is None:
-            print('No scalars defined, these methods are available:')
-            print(*possibleMethods)
-            return
-        
-        nonexistant_methods = [entry for entry in scalarNames if 'compute_' + entry not in method_names]
-        
-        if len(nonexistant_methods) > 0:
-            raise Exception(str(['compute_' + a for a in nonexistant_methods]) + ' does not exist in gait_analysis class.')
-        
-        scalarDict = {}
-        for scalarName in scalarNames:
-            thisFunction = getattr(self, 'compute_' + scalarName)
-            scalarDict[scalarName] = {}
-            (scalarDict[scalarName]['value'],
-                scalarDict[scalarName]['units']) = thisFunction(return_all=return_all)
-        
-        return scalarDict
     
     
     def compute_stride_length(self,return_all=False):
@@ -797,33 +816,52 @@ class gait_analysis(kinematics):
         else:
             return leg, contLeg
     
-    def get_coordinates_normalized_time(self):
-        
+    def get_coordinates_normalized_time(self, selected_cycle_index=None):
+        """
+        Returns time-normalized coordinate values.
+
+        If selected_cycle_index is provided, only that gait cycle is processed.
+        Otherwise, all available gait cycles are averaged (and SD shown if >2).
+        """
         colNames = self.coordinateValues.columns
         data = self.coordinateValues.to_numpy(copy=True)
         coordValuesNorm = []
+
+        if selected_cycle_index is not None:
+            idx = self.gaitEvents['ipsilateralIdx'][selected_cycle_index]
+            coordValues = data[idx[0]:idx[2] + 1]
+            norm = np.stack([
+                np.interp(np.linspace(0, 100, 101),
+                          np.linspace(0, 100, len(coordValues)),
+                          coordValues[:, i])
+                for i in range(coordValues.shape[1])
+            ], axis=1)
+            return {
+                'mean': pd.DataFrame(data=norm, columns=colNames),
+                'sd': None,
+                'indiv': [pd.DataFrame(data=norm, columns=colNames)]
+            }
+
+        # Default: average over all gait cycles
         for i in range(self.nGaitCycles):
-            coordValues = data[self.gaitEvents['ipsilateralIdx'][i,0]:self.gaitEvents['ipsilateralIdx'][i,2]+1]
-            coordValuesNorm.append(np.stack([np.interp(np.linspace(0,100,101),
-                                   np.linspace(0,100,len(coordValues)),coordValues[:,i]) \
-                                   for i in range(coordValues.shape[1])],axis=1))
-             
-        coordinateValuesTimeNormalized = {}
-        # Average.
-        coordVals_mean = np.mean(np.array(coordValuesNorm),axis=0)
-        coordinateValuesTimeNormalized['mean'] = pd.DataFrame(data=coordVals_mean, columns=colNames)
-        
-        # Standard deviation.
-        if self.nGaitCycles >2:
-            coordVals_sd = np.std(np.array(coordValuesNorm), axis=0)
-            coordinateValuesTimeNormalized['sd'] = pd.DataFrame(data=coordVals_sd, columns=colNames)
-        else:
-            coordinateValuesTimeNormalized['sd'] = None
-        
-        # Return to dataframe.
-        coordinateValuesTimeNormalized['indiv'] = [pd.DataFrame(data=d, columns=colNames) for d in coordValuesNorm]
-        
+            idx = self.gaitEvents['ipsilateralIdx'][i]
+            coordValues = data[idx[0]:idx[2] + 1]
+            norm = np.stack([
+                np.interp(np.linspace(0, 100, 101),
+                          np.linspace(0, 100, len(coordValues)),
+                          coordValues[:, j])
+                for j in range(coordValues.shape[1])
+            ], axis=1)
+            coordValuesNorm.append(norm)
+
+        coordinateValuesTimeNormalized = {
+            'mean': pd.DataFrame(data=np.mean(coordValuesNorm, axis=0), columns=colNames),
+            'sd': pd.DataFrame(data=np.std(coordValuesNorm, axis=0), columns=colNames) if self.nGaitCycles > 2 else None,
+            'indiv': [pd.DataFrame(data=d, columns=colNames) for d in coordValuesNorm]
+        }
+
         return coordinateValuesTimeNormalized
+
 
     def segment_walking(self, n_gait_cycles=-1, leg='auto', visualize=False):
 

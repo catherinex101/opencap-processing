@@ -32,7 +32,6 @@ sys.path.append("../")
 sys.path.append("../ActivityAnalyses")
 
 from gait_analysis import gait_analysis
-from utils import get_trial_id, download_trial
 from utilsPlotting import plot_dataframe_with_shading
 
 # %% Functions.
@@ -57,15 +56,36 @@ def get_video_duration(video_path):
     frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     duration = frame_count / fps
     cap.release()
+
+    print(f"\n📹 Video duration: {duration:.2f} seconds")
     return duration
 
-def select_valid_gait_cycle(gait_obj, video_duration, buffer=0.5):
-    gait_times = gait_obj.gaitEvents['ipsilateralTime']
-    for i in reversed(range(gait_times.shape[0])):
-        hs1, _, hs2 = gait_times[i]
-        if hs2 + buffer <= video_duration:
+def __select_valid_gait_cycle(gait_obj, video_duration_sec, buffer):
+    times = gait_obj.gaitEvents['ipsilateralTime']
+    # Reverse order so 0 is latest
+    for i in (range(len(times))):
+        _, _, hs2 = times[i]
+        if hs2 + buffer <= video_duration_sec:
+            print(f"✅ Selected gait cycle index: {i} (HS2 = {hs2:.2f}s)")
+            return i
+    raise ValueError("❌ No valid gait cycle found before video end.")
+
+def select_valid_gait_cycle(gait_obj, video_duration_sec, buffer=0.01):
+    """
+    Select the latest valid gait cycle (index 0) that ends before (video_duration - buffer).
+    Returns: (HS1_time, HS2_time, selected_cycle_index)
+    Assumes gaitEvents['ipsilateralTime'] is ordered with latest cycle at index 0.
+    """
+    times = gait_obj.gaitEvents['ipsilateralTime']
+    
+    for i in range(len(times)):  # 0 = latest
+        hs1, _, hs2 = times[i]
+        if hs2 + buffer <= video_duration_sec:
+            print(f"✅ Selected gait cycle index: {i} (HS2 = {hs2:.2f}s)")
             return hs1, hs2, i
-    return None, None, -1
+
+    raise ValueError("❌ No valid gait cycle found before video end.")
+
 
 # %% Paths.
 baseDir = os.path.join(os.getcwd(), '..')
@@ -78,7 +98,7 @@ n_gait_cycles = 2
 filter_frequency = 6
 
 # Set local session path and trial name manually
-sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\sub-LSSPilot\OpenCapData_edd37cfe-8d50-48b8-ab12-a966aec7be55"
+sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\sub-LSSPilot\OpenCapData_532c118d-a51c-4b8b-9528-7c70ddf4fddb"
 trialName = "10_m_walk"
 
 metadata_path = os.path.join(sessionDir, 'sessionMetadata.yaml')
@@ -91,6 +111,7 @@ mass_kg = metadata['mass_kg']
 video_filename = f"{trialName}_sync.mp4"
 cam1_path = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
 cam0_path = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
+
 video_duration_sec = min(get_video_duration(cam1_path), get_video_duration(cam0_path))
 
 # ========== Right Gait Analysis ==========
@@ -101,16 +122,18 @@ gait_r = gait_analysis(
 
 gait_r.print_gait_cycle_times()
 
-hs1_r, hs2_r, idx_r = select_valid_gait_cycle(gait_r, video_duration_sec, buffer=0.5)
+hs1_r, hs2_r, idx_r = select_valid_gait_cycle(gait_r, video_duration_sec, buffer=0.3)
 
-save_cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_r_5_4_2025.mp4")
-save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r_5_4_2025.mp4")
+# Right gait cropping and analysis
+save_cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
+save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
 
-if idx_r != -1:
-    crop_video_ffmpeg(cam1_path, save_cam1_path_r, hs1_r, hs2_r)
-    crop_video_ffmpeg(cam0_path, save_cam0_path_r, hs1_r, hs2_r)
-else:
-    print("❌ No valid right gait cycle within video duration. Skipping right crop.")
+crop_video_ffmpeg(cam1_path, save_cam1_path_r, hs1_r, hs2_r)
+crop_video_ffmpeg(cam0_path, save_cam0_path_r, hs1_r, hs2_r)
+
+gaitResults = {}
+gaitResults['scalars_r'] = gait_r.compute_scalars(scalar_names, selected_cycle_index=idx_r)
+gaitResults['curves_r'] = gait_r.get_coordinates_normalized_time(selected_cycle_index=idx_r)
 
 # ========== Left Gait Analysis ==========
 gait_l = gait_analysis(
@@ -120,24 +143,23 @@ gait_l = gait_analysis(
 
 gait_l.print_gait_cycle_times()
 
-hs1_l, hs2_l, idx_l = select_valid_gait_cycle(gait_l, video_duration_sec, buffer=0.5)
+hs1_l, hs2_l, idx_l = select_valid_gait_cycle(gait_l, video_duration_sec, buffer=0.3)
 
-save_cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_l_5_4_2025.mp4")
-save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l_5_4_2025.mp4")
+# Left gait cropping and analysis
+save_cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
+save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
 
-if idx_l != -1:
-    crop_video_ffmpeg(cam1_path, save_cam1_path_l, hs1_l, hs2_l)
-    crop_video_ffmpeg(cam0_path, save_cam0_path_l, hs1_l, hs2_l)
-else:
-    print("❌ No valid left gait cycle within video duration. Skipping left crop.")
+crop_video_ffmpeg(cam1_path, save_cam1_path_l, hs1_l, hs2_l)
+crop_video_ffmpeg(cam0_path, save_cam0_path_l, hs1_l, hs2_l)
 
-# === Gait Metrics and Plotting ===
-gaitResults = {}
-gaitResults['scalars_r'] = gait_r.compute_scalars(scalar_names)
-gaitResults['curves_r'] = gait_r.get_coordinates_normalized_time()
-gaitResults['scalars_l'] = gait_l.compute_scalars(scalar_names)
-gaitResults['curves_l'] = gait_l.get_coordinates_normalized_time()
+gaitResults['scalars_l'] = gait_l.compute_scalars(scalar_names, selected_cycle_index=idx_l)
+gaitResults['curves_l'] = gait_l.get_coordinates_normalized_time(selected_cycle_index=idx_l)
 
+# ========== Print Gait Selection ==========
+print(f"🦶 Selected right gait cycle index: {idx_r}")
+print(f"🦶 Selected left gait cycle index: {idx_l}")
+
+# ========== Print Gait Analysis ==========
 print('\nRight foot gait metrics:')
 print('-----------------')
 for key, value in gaitResults['scalars_r'].items():
@@ -150,6 +172,7 @@ for key, value in gaitResults['scalars_l'].items():
     rounded_value = round(value['value'], 2)
     print(f"{key}: {rounded_value} {value['units']}")
 
+# ========== Output Kinematics ==========
 plot_dataframe_with_shading(
     [gaitResults['curves_r']['mean'], gaitResults['curves_l']['mean']],
     [gaitResults['curves_r']['sd'], gaitResults['curves_l']['sd']],
@@ -161,13 +184,15 @@ plot_dataframe_with_shading(
 avg_metrics = {}
 for key in scalar_names:
     if key == 'step_length_symmetry':
-        avg_metrics[key] = gaitResults['scalars_r'][key]
+        avg_metrics[key] = gaitResults['scalars_r'].get(key, {'value': None, 'units': ''})
         continue
-    val_r = gaitResults['scalars_r'][key]['value']
-    val_l = gaitResults['scalars_l'][key]['value']
-    unit = gaitResults['scalars_r'][key]['units']
-    avg_metrics[key] = {'value': (val_r + val_l) / 2, 'units': unit}
+    val_r = gaitResults['scalars_r'].get(key, {}).get('value')
+    val_l = gaitResults['scalars_l'].get(key, {}).get('value')
+    if val_r is not None and val_l is not None:
+        unit = gaitResults['scalars_r'][key]['units']
+        avg_metrics[key] = {'value': (val_r + val_l) / 2, 'units': unit}
 
+# ========== Output Gait Analysis Table ==========
 stride_threshold = 0.45 * height_m
 step_width_min = 0.043 * height_m * 100
 step_width_max = 0.074 * height_m * 100
@@ -234,7 +259,7 @@ for key in metric_display:
 
 df_summary = pd.DataFrame(summary)
 
-output_dir = os.path.join(sessionDir, 'PilotAnalysis_4_27_25')
+output_dir = os.path.join(sessionDir, 'PilotAnalysis_5_4_25')
 os.makedirs(output_dir, exist_ok=True)
 
 output_path = os.path.join(output_dir, 'gait_summary_table.csv')
