@@ -5,7 +5,9 @@
     Copyright 2022 Stanford University and the Authors
     
     Author(s): Antoine Falisse, Scott Uhlrich
-    
+    Modified by Catherine
+    Adapted from example: example_kinetics.py
+
     Licensed under the Apache License, Version 2.0 (the "License"); you may not
     use this file except in compliance with the License. You may obtain a copy
     of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -118,10 +120,29 @@ if session_type == 'overground':
         repetition = 1
     elif trial_name == 'sitstand': # Sit-to-stand        
         motion_type = 'sit_to_stand'
-        repetition = None
+        repetition = 1
     elif trial_name == 'jump': # Jump  
         motion_type = 'jumping'
         time_window = [1.3, 2.2]
+# Options are 'walk_1_25ms', 'run_2_5ms', and 'run_4ms'.
+elif session_type == 'treadmill': 
+    trial_name = 'walk_1_25ms'
+    torque_driven_model = False # Example with torque-driven model.
+    if trial_name == 'walk_1_25ms': # Walking, 1.25 m/s
+        motion_type = 'walking'
+        time_window = [1.0, 2.5]
+        treadmill_speed = 1.25
+    elif trial_name == 'run_2_5ms': # Running, 2.5 m/s
+        if torque_driven_model:
+            motion_type = 'running_torque_driven'
+        else:
+            motion_type = 'running'
+        time_window = [1.4, 2.6]
+        treadmill_speed = 2.5
+    elif trial_name == 'run_4ms': # Running with periodic constraints, 4.0 m/s
+        motion_type = 'my_periodic_running'
+        time_window = [3.1833333, 3.85]
+        treadmill_speed = 4.0
     
 # Set to True to solve the optimal control problem.
 solveProblem = True
