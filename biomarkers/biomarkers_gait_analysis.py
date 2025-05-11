@@ -98,8 +98,8 @@ n_gait_cycles = 2
 filter_frequency = 6
 
 # Set local session path and trial name manually
-sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\sub-LSSPilot\OpenCapData_532c118d-a51c-4b8b-9528-7c70ddf4fddb"
-trialName = "10_m_walk"
+sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\biomarkers\OpenCapData_82b42488-8582-4801-a366-3c476719a167"
+trialName = "walk"
 
 metadata_path = os.path.join(sessionDir, 'sessionMetadata.yaml')
 with open(metadata_path, 'r') as f:
@@ -259,9 +259,24 @@ for key in metric_display:
 
 df_summary = pd.DataFrame(summary)
 
-output_dir = os.path.join(sessionDir, 'PilotAnalysis_5_4_25')
+output_dir = os.path.join(sessionDir, 'Gait_Analysis_Output')
 os.makedirs(output_dir, exist_ok=True)
 
 output_path = os.path.join(output_dir, 'gait_summary_table.csv')
 df_summary.to_csv(output_path, index=False)
 print(f"\n✅ Gait metric summary saved to: {output_path}")
+
+# Set OpenSim GUI executable path
+opensim_gui_path = r"C:\OpenSim 4.5\bin\OpenSim64.exe"  # Adjust if needed
+
+# Get full paths to model and motion file
+model_path = os.path.join(sessionDir, 'OpenSimData', 'Model', 'LaiUhlrich2022_scaled.osim')
+mot_path = os.path.join(sessionDir, 'OpenSimData', 'Kinematics', f'{trialName}.mot')
+
+# Launch OpenSim GUI with the model
+subprocess.Popen([opensim_gui_path, model_path])
+
+print("\nOpenSim GUI launched with model:")
+print(model_path)
+print("Please manually load the motion file in the GUI:")
+print(mot_path)
