@@ -43,14 +43,10 @@ print("\n📋 Session IDs to be processed:")
 
 for session_id in sessionList:
     # If only interested in marker and OpenSim data, downladVideos=False will be faster
-    session_path = os.path.join(downloadPath, session_id)
+    session_path = os.path.join(downloadPath, f'OpenCapData_{session_id}')
     print(f"- {session_id}")
 
     if os.path.exists(session_path):
-        print(f"❌ Skipping {session_id}: Folder already exists at {session_path}")
-        # Option 1: continue downloading
-        # continue  
-        # Option 2: `raise FileExistsError` to stop entirely
         raise FileExistsError(f"❌ Folder already exists for {session_id}: {session_path}")
 
     download_session(session_id, sessionBasePath=downloadPath, downloadVideos=True)
