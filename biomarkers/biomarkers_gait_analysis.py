@@ -173,6 +173,8 @@ for key, value in gaitResults['scalars_l'].items():
     print(f"{key}: {rounded_value} {value['units']}")
 
 # ========== Output Kinematics ==========
+# No kinematics on first pass run
+'''
 plot_dataframe_with_shading(
     [gaitResults['curves_r']['mean'], gaitResults['curves_l']['mean']],
     [gaitResults['curves_r']['sd'], gaitResults['curves_l']['sd']],
@@ -191,8 +193,20 @@ for key in scalar_names:
     if val_r is not None and val_l is not None:
         unit = gaitResults['scalars_r'][key]['units']
         avg_metrics[key] = {'value': (val_r + val_l) / 2, 'units': unit}
+'''
+
+avg_metrics = {}
+for key in scalar_names:
+    if key == 'step_length_symmetry':
+        avg_metrics[key] = gaitResults['scalars_r'].get(key, {'value': None})
+        continue
+    val_r = gaitResults['scalars_r'].get(key, {}).get('value')
+    val_l = gaitResults['scalars_l'].get(key, {}).get('value')
+    if val_r is not None and val_l is not None:
+        avg_metrics[key] = {'value': (val_r + val_l) / 2}
 
 # ========== Output Gait Analysis Table ==========
+'''
 stride_threshold = 0.45 * height_m
 step_width_min = 0.043 * height_m * 100
 step_width_max = 0.074 * height_m * 100
@@ -205,7 +219,9 @@ thresholds = {
     'double_support_time': {'good': 35},
     'step_length_symmetry': {'min': 90, 'max': 110}
 }
+'''
 
+'''
 def classify(metric, value):
     if metric == 'gait_speed':
         return 'within normal gait range' if value >= thresholds[metric]['good'] else 'low'
@@ -219,6 +235,7 @@ def classify(metric, value):
         return 'within normal gait range' if value < thresholds[metric]['good'] else 'high'
     elif metric == 'step_length_symmetry':
         return 'within normal gait range' if thresholds[metric]['min'] <= value <= thresholds[metric]['max'] else 'asymmetric'
+'''
 
 metric_display = {
     'gait_speed': 'Gait speed (m/s)',
@@ -229,6 +246,31 @@ metric_display = {
     'step_length_symmetry': 'Step length symmetry (%, R/L)'
 }
 
+# Create flipped dataframe (metrics as columns for first pass model run)
+data = {}
+for key, display_name in metric_display.items():
+    val = avg_metrics[key]['value']
+    if key == 'step_width':
+        val *= 100  # convert to cm
+    data[display_name] = [round(val, 2)]
+
+# Extract session ID from sessionDir path
+session_id = os.path.basename(sessionDir).replace("OpenCapData_", "")
+
+# Add session ID as a column
+data['Opencap Session ID'] = [session_id]
+
+# Create dataframe
+df_columns = pd.DataFrame(data)
+
+output_dir = os.path.join(sessionDir, 'Gait_Analysis_Pass1')
+os.makedirs(output_dir, exist_ok=True)
+
+output_path = os.path.join(output_dir, 'gait_metrics_pass1.csv')
+df_columns.to_csv(output_path, index=False)
+print(f"\n✅ Gait metrics saved to: {output_path}")
+
+'''
 summary = {
     'Metric': [],
     'Value': [],
@@ -265,6 +307,7 @@ os.makedirs(output_dir, exist_ok=True)
 output_path = os.path.join(output_dir, 'gait_summary_table.csv')
 df_summary.to_csv(output_path, index=False)
 print(f"\n✅ Gait metric summary saved to: {output_path}")
+'''
 
 # Set OpenSim GUI executable path
 opensim_gui_path = r"C:\OpenSim 4.5\bin\OpenSim64.exe"  # Adjust if needed
