@@ -1,4 +1,4 @@
-'''
+﻿'''
     ---------------------------------------------------------------------------
     OpenCap processing: utils.py
     ---------------------------------------------------------------------------
@@ -459,53 +459,52 @@ def numpy_to_storage(labels, data, storage_file, datatype=None):
         
     f.close()
 
-def download_videos_from_server(session_id,trial_id,
-                             isCalibration=False, isStaticPose=False,
-                             trial_name= None, session_path = None):
-    
+def download_videos_from_server(session_id, trial_id,
+                                 isCalibration=False, isStaticPose=False,
+                                 trial_name=None, session_path=None):
+
+    print(f"📥 download_videos_from_server called for trial_id: {trial_id}")
+
     if session_path is None:
-        data_dir = os.getcwd() 
-        session_path = os.path.join(data_dir,'Data', session_id)  
-    if not os.path.exists(session_path): 
+        data_dir = os.getcwd()
+        session_path = os.path.join(data_dir, 'Data', session_id)
+    if not os.path.exists(session_path):
         os.makedirs(session_path, exist_ok=True)
-    
-    resp = requests.get("{}trials/{}/".format(API_URL,trial_id),
-                         headers = {"Authorization": "Token {}".format(API_TOKEN)})
+
+    resp = requests.get("{}trials/{}/".format(API_URL, trial_id),
+                        headers={"Authorization": "Token {}".format(API_TOKEN)})
     trial = resp.json()
     if trial_name is None:
         trial_name = trial['name']
     trial_name = trial_name.replace(' ', '')
 
-    print("\nDownloading {}".format(trial_name))
+    print(f"📂 Downloading videos for: {trial_name}")
 
-    # The videos are not always organized in the same order. Here, we save
-    # the order during the first trial processed in the session such that we
-    # can use the same order for the other trials.
     if not os.path.exists(os.path.join(session_path, "Videos", 'mappingCamDevice.pickle')):
         mappingCamDevice = {}
         for k, video in enumerate(trial["videos"]):
-            os.makedirs(os.path.join(session_path, "Videos", "Cam{}".format(k), "InputMedia", trial_name), exist_ok=True)
-            video_path = os.path.join(session_path, "Videos", "Cam{}".format(k), "InputMedia", trial_name, trial_name + ".mov")
-            download_file(video["video"], video_path)                
+            os.makedirs(os.path.join(session_path, "Videos", f"Cam{k}", "InputMedia", trial_name), exist_ok=True)
+            video_path = os.path.join(session_path, "Videos", f"Cam{k}", "InputMedia", trial_name, f"{trial_name}.mov")
+            download_file(video["video"], video_path)
             mappingCamDevice[video["device_id"].replace('-', '').upper()] = k
         with open(os.path.join(session_path, "Videos", 'mappingCamDevice.pickle'), 'wb') as handle:
             pickle.dump(mappingCamDevice, handle)
     else:
         with open(os.path.join(session_path, "Videos", 'mappingCamDevice.pickle'), 'rb') as handle:
-            mappingCamDevice = pickle.load(handle) 
-            # ensure upper on deviceID
-            for dID in mappingCamDevice.keys():
+            mappingCamDevice = pickle.load(handle)
+            for dID in list(mappingCamDevice.keys()):
                 mappingCamDevice[dID.upper()] = mappingCamDevice.pop(dID)
-        for video in trial["videos"]:            
-            k = mappingCamDevice[video["device_id"].replace('-', '').upper()] 
-            videoDir = os.path.join(session_path, "Videos", "Cam{}".format(k), "InputMedia", trial_name)
+        for video in trial["videos"]:
+            k = mappingCamDevice[video["device_id"].replace('-', '').upper()]
+            videoDir = os.path.join(session_path, "Videos", f"Cam{k}", "InputMedia", trial_name)
             os.makedirs(videoDir, exist_ok=True)
-            video_path = os.path.join(videoDir, trial_name + ".mov")
+            video_path = os.path.join(videoDir, f"{trial_name}.mov")
             if not os.path.exists(video_path):
-                if video['video'] :
+                if video['video']:
                     download_file(video["video"], video_path)
-              
+
     return trial_name
+
    
     
 def get_calibration(session_id,session_path):

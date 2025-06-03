@@ -27,14 +27,13 @@ import yaml
 import pandas as pd
 import subprocess
 import cv2
+from datetime import datetime
 
 sys.path.append("../")
 sys.path.append("../ActivityAnalyses")
 
 from gait_analysis import gait_analysis
-from utilsPlotting import plot_dataframe_with_shading
 
-# %% Functions.
 def crop_video_ffmpeg(input_path, output_path, start_time, end_time):
     duration = end_time - start_time
     cmd = [
@@ -56,270 +55,151 @@ def get_video_duration(video_path):
     frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     duration = frame_count / fps
     cap.release()
-
     print(f"\n📹 Video duration: {duration:.2f} seconds")
     return duration
 
-def __select_valid_gait_cycle(gait_obj, video_duration_sec, buffer):
-    times = gait_obj.gaitEvents['ipsilateralTime']
-    # Reverse order so 0 is latest
-    for i in (range(len(times))):
-        _, _, hs2 = times[i]
-        if hs2 + buffer <= video_duration_sec:
-            print(f"✅ Selected gait cycle index: {i} (HS2 = {hs2:.2f}s)")
-            return i
-    raise ValueError("❌ No valid gait cycle found before video end.")
-
 def select_valid_gait_cycle(gait_obj, video_duration_sec, buffer=0.01):
-    """
-    Select the latest valid gait cycle (index 0) that ends before (video_duration - buffer).
-    Returns: (HS1_time, HS2_time, selected_cycle_index)
-    Assumes gaitEvents['ipsilateralTime'] is ordered with latest cycle at index 0.
-    """
     times = gait_obj.gaitEvents['ipsilateralTime']
-    
-    for i in range(len(times)):  # 0 = latest
+    for i in range(len(times)):
         hs1, _, hs2 = times[i]
         if hs2 + buffer <= video_duration_sec:
             print(f"✅ Selected gait cycle index: {i} (HS2 = {hs2:.2f}s)")
             return hs1, hs2, i
-
     raise ValueError("❌ No valid gait cycle found before video end.")
 
+def process_gait_session(sessionDir):
+    trialName = "walk"
+    metadata_path = os.path.join(sessionDir, 'sessionMetadata.yaml')
+    with open(metadata_path, 'r') as f:
+        metadata = yaml.safe_load(f)
+    height_m = metadata['height_m']
+    
+    scalar_names = {'gait_speed','stride_length','step_width','cadence',
+                    'single_support_time','double_support_time','step_length_symmetry'}
+    filter_frequency = 6
+    n_gait_cycles = 2
 
-# %% Paths.
-baseDir = os.path.join(os.getcwd(), '..')
-dataFolder = os.path.join(baseDir, 'Data')
+    video_filename = f"{trialName}_sync.mp4"
+    cam1_path = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
+    cam0_path = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
+    video_duration_sec = min(get_video_duration(cam1_path), get_video_duration(cam0_path))
 
-scalar_names = {'gait_speed','stride_length','step_width','cadence',
-                'single_support_time','double_support_time','step_length_symmetry'}
+    gait_r = gait_analysis(sessionDir, trialName, leg='r',
+        lowpass_cutoff_frequency_for_coordinate_values=filter_frequency,
+        n_gait_cycles=n_gait_cycles, gait_style='overground')
+    hs1_r, hs2_r, idx_r = select_valid_gait_cycle(gait_r, video_duration_sec, buffer=0.3)
 
-n_gait_cycles = 2
-filter_frequency = 6
+    save_cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
+    save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
+    crop_video_ffmpeg(cam1_path, save_cam1_path_r, hs1_r, hs2_r)
+    crop_video_ffmpeg(cam0_path, save_cam0_path_r, hs1_r, hs2_r)
 
-# Set local session path and trial name manually
-sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\biomarkers\OpenCapData_82b42488-8582-4801-a366-3c476719a167"
-trialName = "walk"
+    scalars_r = gait_r.compute_scalars(scalar_names, selected_cycle_index=idx_r)
 
-metadata_path = os.path.join(sessionDir, 'sessionMetadata.yaml')
-with open(metadata_path, 'r') as f:
-    metadata = yaml.safe_load(f)
+    gait_l = gait_analysis(sessionDir, trialName, leg='l',
+        lowpass_cutoff_frequency_for_coordinate_values=filter_frequency,
+        n_gait_cycles=n_gait_cycles, gait_style='overground')
+    hs1_l, hs2_l, idx_l = select_valid_gait_cycle(gait_l, video_duration_sec, buffer=0.3)
 
-height_m = metadata['height_m']
-mass_kg = metadata['mass_kg']
+    save_cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
+    save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
+    crop_video_ffmpeg(cam1_path, save_cam1_path_l, hs1_l, hs2_l)
+    crop_video_ffmpeg(cam0_path, save_cam0_path_l, hs1_l, hs2_l)
 
-video_filename = f"{trialName}_sync.mp4"
-cam1_path = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
-cam0_path = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
+    scalars_l = gait_l.compute_scalars(scalar_names, selected_cycle_index=idx_l)
 
-video_duration_sec = min(get_video_duration(cam1_path), get_video_duration(cam0_path))
+    avg_metrics = {}
+    for key in scalar_names:
+        if key == 'step_length_symmetry':
+            avg_metrics[key] = scalars_r.get(key, {'value': None})
+            continue
+        val_r = scalars_r.get(key, {}).get('value')
+        val_l = scalars_l.get(key, {}).get('value')
+        if val_r is not None and val_l is not None:
+            avg_metrics[key] = {'value': (val_r + val_l) / 2}
 
-# ========== Right Gait Analysis ==========
-gait_r = gait_analysis(
-    sessionDir, trialName, leg='r',
-    lowpass_cutoff_frequency_for_coordinate_values=filter_frequency,
-    n_gait_cycles=n_gait_cycles, gait_style='overground')
+    metric_display = {
+        'gait_speed': 'Gait speed (m/s)',
+        'stride_length': 'Stride length (m)',
+        'step_width': 'Step width (cm)',
+        'cadence': 'Cadence (steps/min)',
+        'double_support_time': 'Double support time (%)',
+        'step_length_symmetry': 'Step length symmetry (%, R/L)'
+    }
 
-gait_r.print_gait_cycle_times()
+    data = {}
+    for key, display_name in metric_display.items():
+        val = avg_metrics[key]['value']
+        if key == 'step_width':
+            val *= 100
+        data[display_name] = [round(val, 2)]
 
-hs1_r, hs2_r, idx_r = select_valid_gait_cycle(gait_r, video_duration_sec, buffer=0.3)
+    session_id = os.path.basename(sessionDir).replace("OpenCapData_", "")
+    data = {'Opencap Session ID': [session_id]} | data
+    df_columns = pd.DataFrame(data)
 
-# Right gait cropping and analysis
-save_cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
-save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
+    output_dir = os.path.join(sessionDir, 'Gait_Analysis_Pass1')
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, 'gait_metrics_pass1.csv')
+    df_columns.to_csv(output_path, index=False)
+    print(f"\n✅ Gait metrics saved to: {output_path}")
 
-crop_video_ffmpeg(cam1_path, save_cam1_path_r, hs1_r, hs2_r)
-crop_video_ffmpeg(cam0_path, save_cam0_path_r, hs1_r, hs2_r)
+    # Launch OpenSim GUI
+    opensim_gui_path = r"C:\OpenSim 4.5\bin\OpenSim64.exe"
+    model_path = os.path.join(sessionDir, 'OpenSimData', 'Model', 'LaiUhlrich2022_scaled.osim')
+    mot_path = os.path.join(sessionDir, 'OpenSimData', 'Kinematics', f'{trialName}.mot')
+    print("\nOpenSim GUI launched with model:")
+    print(model_path)
+    print("Please manually load the motion file in the GUI:")
+    print(mot_path)
+    subprocess.run([opensim_gui_path, model_path])
 
-gaitResults = {}
-gaitResults['scalars_r'] = gait_r.compute_scalars(scalar_names, selected_cycle_index=idx_r)
-gaitResults['curves_r'] = gait_r.get_coordinates_normalized_time(selected_cycle_index=idx_r)
+    return df_columns
 
-# ========== Left Gait Analysis ==========
-gait_l = gait_analysis(
-    sessionDir, trialName, leg='l',
-    lowpass_cutoff_frequency_for_coordinate_values=filter_frequency,
-    n_gait_cycles=n_gait_cycles, gait_style='overground')
+# ================================
+# MAIN — Run one session at a time
+# ================================
+if __name__ == "__main__":
+    sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\biomarkers\OpenCapData_73cbe6ea-05b6-4c6b-a522-ab1be0221637"
+    base_dir = os.path.dirname(sessionDir)
+    compiled_csv_path = os.path.join(base_dir, 'gait_metrics_compiled.csv')
+    log_path = os.path.join(base_dir, 'gait_metrics_log.txt')
 
-gait_l.print_gait_cycle_times()
+    try:
+        df = process_gait_session(sessionDir)
+        session_id = df['Opencap Session ID'].iloc[0]
 
-hs1_l, hs2_l, idx_l = select_valid_gait_cycle(gait_l, video_duration_sec, buffer=0.3)
+        # Check for duplicates
+        if os.path.exists(compiled_csv_path):
+            compiled_df = pd.read_csv(compiled_csv_path)
+            if session_id in compiled_df['Opencap Session ID'].values:
+                print(f"⚠️ Session {session_id} already exists in compiled CSV. Skipping.")
+                with open(log_path, 'a') as logf:
+                    logf.write(f"{datetime.now()} — Duplicate session skipped: {session_id}\n")
+                sys.exit(0)
 
-# Left gait cropping and analysis
-save_cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
-save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
+        print("\n📊 Summary of extracted metrics:")
+        print(df.to_string(index=False))
 
-crop_video_ffmpeg(cam1_path, save_cam1_path_l, hs1_l, hs2_l)
-crop_video_ffmpeg(cam0_path, save_cam0_path_l, hs1_l, hs2_l)
+        approve = input("\n➕ Include this session in master CSV? (y/n): ").strip().lower()
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-gaitResults['scalars_l'] = gait_l.compute_scalars(scalar_names, selected_cycle_index=idx_l)
-gaitResults['curves_l'] = gait_l.get_coordinates_normalized_time(selected_cycle_index=idx_l)
+        if approve == 'y':
+            if os.path.exists(compiled_csv_path):
+                master_df = pd.read_csv(compiled_csv_path)
+                master_df = pd.concat([master_df, df], ignore_index=True)
+            else:
+                master_df = df
+            master_df.to_csv(compiled_csv_path, index=False)
+            print(f"✅ Added to master CSV: {compiled_csv_path}")
+            with open(log_path, 'a') as logf:
+                logf.write(f"{timestamp} — Included session: {session_id}\n")
+        else:
+            print("❌ Skipped adding to master CSV.")
+            with open(log_path, 'a') as logf:
+                logf.write(f"{timestamp} — Skipped session: {session_id}\n")
 
-# ========== Print Gait Selection ==========
-print(f"🦶 Selected right gait cycle index: {idx_r}")
-print(f"🦶 Selected left gait cycle index: {idx_l}")
-
-# ========== Print Gait Analysis ==========
-print('\nRight foot gait metrics:')
-print('-----------------')
-for key, value in gaitResults['scalars_r'].items():
-    rounded_value = round(value['value'], 2)
-    print(f"{key}: {rounded_value} {value['units']}")
-
-print('\nLeft foot gait metrics:')
-print('-----------------')
-for key, value in gaitResults['scalars_l'].items():
-    rounded_value = round(value['value'], 2)
-    print(f"{key}: {rounded_value} {value['units']}")
-
-# ========== Output Kinematics ==========
-# No kinematics on first pass run
-'''
-plot_dataframe_with_shading(
-    [gaitResults['curves_r']['mean'], gaitResults['curves_l']['mean']],
-    [gaitResults['curves_r']['sd'], gaitResults['curves_l']['sd']],
-    leg = ['r','l'],
-    xlabel = '% gait cycle',
-    title = 'kinematics (m or deg)',
-    legend_entries = ['right','left'])
-
-avg_metrics = {}
-for key in scalar_names:
-    if key == 'step_length_symmetry':
-        avg_metrics[key] = gaitResults['scalars_r'].get(key, {'value': None, 'units': ''})
-        continue
-    val_r = gaitResults['scalars_r'].get(key, {}).get('value')
-    val_l = gaitResults['scalars_l'].get(key, {}).get('value')
-    if val_r is not None and val_l is not None:
-        unit = gaitResults['scalars_r'][key]['units']
-        avg_metrics[key] = {'value': (val_r + val_l) / 2, 'units': unit}
-'''
-
-avg_metrics = {}
-for key in scalar_names:
-    if key == 'step_length_symmetry':
-        avg_metrics[key] = gaitResults['scalars_r'].get(key, {'value': None})
-        continue
-    val_r = gaitResults['scalars_r'].get(key, {}).get('value')
-    val_l = gaitResults['scalars_l'].get(key, {}).get('value')
-    if val_r is not None and val_l is not None:
-        avg_metrics[key] = {'value': (val_r + val_l) / 2}
-
-# ========== Output Gait Analysis Table ==========
-'''
-stride_threshold = 0.45 * height_m
-step_width_min = 0.043 * height_m * 100
-step_width_max = 0.074 * height_m * 100
-
-thresholds = {
-    'gait_speed': {'good': 1.12},
-    'stride_length': {'good': stride_threshold},
-    'step_width': {'min': step_width_min, 'max': step_width_max},
-    'cadence': {'good': 100},
-    'double_support_time': {'good': 35},
-    'step_length_symmetry': {'min': 90, 'max': 110}
-}
-'''
-
-'''
-def classify(metric, value):
-    if metric == 'gait_speed':
-        return 'within normal gait range' if value >= thresholds[metric]['good'] else 'low'
-    elif metric == 'stride_length':
-        return 'within normal gait range' if value >= thresholds[metric]['good'] else 'low'
-    elif metric == 'step_width':
-        return 'within normal gait range' if thresholds[metric]['min'] <= value * 100 <= thresholds[metric]['max'] else 'high'
-    elif metric == 'cadence':
-        return 'within normal gait range' if value >= thresholds[metric]['good'] else 'low'
-    elif metric == 'double_support_time':
-        return 'within normal gait range' if value < thresholds[metric]['good'] else 'high'
-    elif metric == 'step_length_symmetry':
-        return 'within normal gait range' if thresholds[metric]['min'] <= value <= thresholds[metric]['max'] else 'asymmetric'
-'''
-
-metric_display = {
-    'gait_speed': 'Gait speed (m/s)',
-    'stride_length': 'Stride length (m)',
-    'step_width': 'Step width (cm)',
-    'cadence': 'Cadence (steps/min)',
-    'double_support_time': 'Double support time (%)',
-    'step_length_symmetry': 'Step length symmetry (%, R/L)'
-}
-
-# Create flipped dataframe (metrics as columns for first pass model run)
-data = {}
-for key, display_name in metric_display.items():
-    val = avg_metrics[key]['value']
-    if key == 'step_width':
-        val *= 100  # convert to cm
-    data[display_name] = [round(val, 2)]
-
-# Extract session ID from sessionDir path
-session_id = os.path.basename(sessionDir).replace("OpenCapData_", "")
-
-# Add session ID as a column
-data['Opencap Session ID'] = [session_id]
-
-# Create dataframe
-df_columns = pd.DataFrame(data)
-
-output_dir = os.path.join(sessionDir, 'Gait_Analysis_Pass1')
-os.makedirs(output_dir, exist_ok=True)
-
-output_path = os.path.join(output_dir, 'gait_metrics_pass1.csv')
-df_columns.to_csv(output_path, index=False)
-print(f"\n✅ Gait metrics saved to: {output_path}")
-
-'''
-summary = {
-    'Metric': [],
-    'Value': [],
-    'Recommended': [],
-    'Status': []
-}
-
-for key in metric_display:
-    display = metric_display[key]
-    val = avg_metrics[key]['value'] * 100 if key == 'step_width' else avg_metrics[key]['value']
-    if key == 'stride_length':
-        recommended = f">= {thresholds[key]['good']:.2f} m"
-    elif key == 'step_width':
-        recommended = f"{thresholds[key]['min']:.1f}-{thresholds[key]['max']:.1f} cm"
-    elif key == 'step_length_symmetry':
-        recommended = f"{thresholds[key]['min']}-{thresholds[key]['max']}"
-    elif key == 'double_support_time':
-        recommended = f"< {thresholds[key]['good']}"
-    else:
-        recommended = f">= {thresholds[key]['good']}"
-
-    status = classify(key, val / 100 if key == 'step_width' else val)
-
-    summary['Metric'].append(display)
-    summary['Value'].append(round(val, 2))
-    summary['Recommended'].append(recommended)
-    summary['Status'].append(status)
-
-df_summary = pd.DataFrame(summary)
-
-output_dir = os.path.join(sessionDir, 'Gait_Analysis_Output')
-os.makedirs(output_dir, exist_ok=True)
-
-output_path = os.path.join(output_dir, 'gait_summary_table.csv')
-df_summary.to_csv(output_path, index=False)
-print(f"\n✅ Gait metric summary saved to: {output_path}")
-'''
-
-# Set OpenSim GUI executable path
-opensim_gui_path = r"C:\OpenSim 4.5\bin\OpenSim64.exe"  # Adjust if needed
-
-# Get full paths to model and motion file
-model_path = os.path.join(sessionDir, 'OpenSimData', 'Model', 'LaiUhlrich2022_scaled.osim')
-mot_path = os.path.join(sessionDir, 'OpenSimData', 'Kinematics', f'{trialName}.mot')
-
-# Launch OpenSim GUI with the model
-subprocess.Popen([opensim_gui_path, model_path])
-
-print("\nOpenSim GUI launched with model:")
-print(model_path)
-print("Please manually load the motion file in the GUI:")
-print(mot_path)
+    except Exception as e:
+        print(f"❌ Error processing session: {e}")
+        with open(log_path, 'a') as logf:
+            logf.write(f"{datetime.now()} — ERROR with session {sessionDir}: {e}\n")
