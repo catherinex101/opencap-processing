@@ -34,7 +34,7 @@ sys.path.append("../ActivityAnalyses")
 
 from gait_analysis import gait_analysis
 
-def crop_video_ffmpeg(input_path, output_path, start_time, end_time):
+def crop_video_ffmpeg(input_path, output_path, start_time, end_time, verbose=False):
     duration = end_time - start_time
     cmd = [
         'ffmpeg', '-y', '-ss', str(start_time), '-i', input_path,
@@ -43,9 +43,14 @@ def crop_video_ffmpeg(input_path, output_path, start_time, end_time):
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
         '-movflags', '+faststart', output_path
     ]
-    print(f"Running ffmpeg crop: {cmd}")
-    subprocess.run(cmd, check=True)
+
+    if verbose:
+        subprocess.run(cmd, check=True)
+    else:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     print(f"✅ Cropped video saved to {output_path}")
+
 
 def get_video_duration(video_path):
     cap = cv2.VideoCapture(video_path)
@@ -58,7 +63,7 @@ def get_video_duration(video_path):
     print(f"\n📹 Video duration: {duration:.2f} seconds")
     return duration
 
-def select_valid_gait_cycle(gait_obj, video_duration_sec, buffer=0.01):
+def select_valid_gait_cycle(gait_obj, video_duration_sec, buffer=0.3):
     times = gait_obj.gaitEvents['ipsilateralTime']
     for i in range(len(times)):
         hs1, _, hs2 = times[i]
@@ -78,7 +83,7 @@ def process_gait_session(sessionDir):
                     'single_support_time','double_support_time','step_length_symmetry'}
     filter_frequency = 6
     n_gait_cycles = 2
-
+    
     video_filename = f"{trialName}_sync.mp4"
     cam1_path = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, video_filename)
     cam0_path = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, video_filename)
@@ -93,6 +98,7 @@ def process_gait_session(sessionDir):
     save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
     crop_video_ffmpeg(cam1_path, save_cam1_path_r, hs1_r, hs2_r)
     crop_video_ffmpeg(cam0_path, save_cam0_path_r, hs1_r, hs2_r)
+    print(f"🦵 Right gait cycle: HS1 = {hs1_r:.2f}s, HS2 = {hs2_r:.2f}s")
 
     scalars_r = gait_r.compute_scalars(scalar_names, selected_cycle_index=idx_r)
 
@@ -105,8 +111,14 @@ def process_gait_session(sessionDir):
     save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
     crop_video_ffmpeg(cam1_path, save_cam1_path_l, hs1_l, hs2_l)
     crop_video_ffmpeg(cam0_path, save_cam0_path_l, hs1_l, hs2_l)
+    print(f"🦵 Left gait cycle: HS1 = {hs1_l:.2f}s, HS2 = {hs2_l:.2f}s")
 
     scalars_l = gait_l.compute_scalars(scalar_names, selected_cycle_index=idx_l)
+
+    # Auto-open the folder where cropped Cam0 video is saved
+    cropped_video_dir = os.path.dirname(save_cam0_path_l)
+    print(f"\n📂 Opening folder: {cropped_video_dir}")
+    subprocess.Popen(f'explorer "{cropped_video_dir}"')
 
     avg_metrics = {}
     for key in scalar_names:
@@ -129,10 +141,14 @@ def process_gait_session(sessionDir):
 
     data = {}
     for key, display_name in metric_display.items():
-        val = avg_metrics[key]['value']
+        val_r = scalars_r.get(key, {}).get('value')
+        val_l = scalars_l.get(key, {}).get('value')
         if key == 'step_width':
-            val *= 100
-        data[display_name] = [round(val, 2)]
+            if val_r: val_r *= 100
+            if val_l: val_l *= 100
+        data[f"Right - {display_name}"] = [round(val_r, 2) if val_r is not None else None]
+        data[f"Left - {display_name}"] = [round(val_l, 2) if val_l is not None else None]
+
 
     session_id = os.path.basename(sessionDir).replace("OpenCapData_", "")
     data = {'Opencap Session ID': [session_id]} | data
@@ -160,7 +176,7 @@ def process_gait_session(sessionDir):
 # MAIN — Run one session at a time
 # ================================
 if __name__ == "__main__":
-    sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\biomarkers\OpenCapData_73cbe6ea-05b6-4c6b-a522-ab1be0221637"
+    sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\biomarkers\OpenCapData_5126e074-0a10-43ed-95ba-027e01954c53"
     base_dir = os.path.dirname(sessionDir)
     compiled_csv_path = os.path.join(base_dir, 'gait_metrics_compiled.csv')
     log_path = os.path.join(base_dir, 'gait_metrics_log.txt')
@@ -178,8 +194,19 @@ if __name__ == "__main__":
                     logf.write(f"{datetime.now()} — Duplicate session skipped: {session_id}\n")
                 sys.exit(0)
 
-        print("\n📊 Summary of extracted metrics:")
-        print(df.to_string(index=False))
+        print("\n📊 Summary of extracted metrics:")        
+        for idx, row in df.iterrows():
+            print(f"🆔 Session ID: {row['Opencap Session ID']}")
+            print("-" * 80)
+            print(f"{'Metric':40} {'Right':>12} {'Left':>12}")
+            print("-" * 80)
+            print(f"{'Gait speed (m/s)':40} {row['Right - Gait speed (m/s)']:>12.2f} {row['Left - Gait speed (m/s)']:>12.2f}")
+            print(f"{'Stride length (m)':40} {row['Right - Stride length (m)']:>12.2f} {row['Left - Stride length (m)']:>12.2f}")
+            print(f"{'Step width (cm)':40} {row['Right - Step width (cm)']:>12.2f} {row['Left - Step width (cm)']:>12.2f}")
+            print(f"{'Cadence (steps/min)':40} {row['Right - Cadence (steps/min)']:>12.2f} {row['Left - Cadence (steps/min)']:>12.2f}")
+            print(f"{'Double support time (%)':40} {row['Right - Double support time (%)']:>12.2f} {row['Left - Double support time (%)']:>12.2f}")
+            print(f"{'Step length symmetry (%, R/L)':40} {row['Right - Step length symmetry (%, R/L)']:>12.2f} {row['Left - Step length symmetry (%, R/L)']:>12.2f}")
+            print("-" * 80)
 
         approve = input("\n➕ Include this session in master CSV? (y/n): ").strip().lower()
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
