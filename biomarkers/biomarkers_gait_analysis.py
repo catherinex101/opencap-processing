@@ -73,7 +73,19 @@ def select_valid_gait_cycle(gait_obj, video_duration_sec, buffer=0.3):
     raise ValueError("❌ No valid gait cycle found before video end.")
 
 def process_gait_session(sessionDir):
-    trialName = "walk"
+    # trialName = "walk"
+    # Auto-detect trial folder that contains "walk" in its name (case-insensitive)
+    input_media_root = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia")
+    trial_folders = [d for d in os.listdir(input_media_root) if os.path.isdir(os.path.join(input_media_root, d)) and 'walk' in d.lower()]
+
+    if len(trial_folders) == 0:
+        raise ValueError("❌ No trial folder containing 'walk' found under Cam0/InputMedia.")
+    elif len(trial_folders) > 1:
+        raise ValueError(f"❌ Multiple trial folders containing 'walk' found: {trial_folders}. Please resolve ambiguity.")
+    else:
+        trialName = trial_folders[0]
+        print(f"🟢 Using trial folder: {trialName}")
+
     metadata_path = os.path.join(sessionDir, 'sessionMetadata.yaml')
     with open(metadata_path, 'r') as f:
         metadata = yaml.safe_load(f)
@@ -92,7 +104,7 @@ def process_gait_session(sessionDir):
     gait_r = gait_analysis(sessionDir, trialName, leg='r',
         lowpass_cutoff_frequency_for_coordinate_values=filter_frequency,
         n_gait_cycles=n_gait_cycles, gait_style='overground')
-    hs1_r, hs2_r, idx_r = select_valid_gait_cycle(gait_r, video_duration_sec, buffer=0.3)
+    hs1_r, hs2_r, idx_r = select_valid_gait_cycle(gait_r, video_duration_sec, buffer=0.5)
 
     save_cam1_path_r = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
     save_cam0_path_r = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_r_cycle{idx_r}.mp4")
@@ -105,7 +117,7 @@ def process_gait_session(sessionDir):
     gait_l = gait_analysis(sessionDir, trialName, leg='l',
         lowpass_cutoff_frequency_for_coordinate_values=filter_frequency,
         n_gait_cycles=n_gait_cycles, gait_style='overground')
-    hs1_l, hs2_l, idx_l = select_valid_gait_cycle(gait_l, video_duration_sec, buffer=0.3)
+    hs1_l, hs2_l, idx_l = select_valid_gait_cycle(gait_l, video_duration_sec, buffer=0.5)
 
     save_cam1_path_l = os.path.join(sessionDir, "Videos", "Cam1", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
     save_cam0_path_l = os.path.join(sessionDir, "Videos", "Cam0", "InputMedia", trialName, f"{trialName}_sync_cropped_l_cycle{idx_l}.mp4")
@@ -176,7 +188,7 @@ def process_gait_session(sessionDir):
 # MAIN — Run one session at a time
 # ================================
 if __name__ == "__main__":
-    sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\biomarkers\OpenCapData_5126e074-0a10-43ed-95ba-027e01954c53"
+    sessionDir = r"C:\Users\cxiang\Documents\GitHub\opencap-processing\Data\biomarkers\OpenCapData_bb5f9134-e063-4489-90bd-2aed09d1767a"
     base_dir = os.path.dirname(sessionDir)
     compiled_csv_path = os.path.join(base_dir, 'gait_metrics_compiled.csv')
     log_path = os.path.join(base_dir, 'gait_metrics_log.txt')
